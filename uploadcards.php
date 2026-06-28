@@ -1,27 +1,28 @@
 <?php
 
-$secret = "DemerzliCards2026";
+$secret = "DEMERZLI_SECRET_2026";
 
-if(!isset($_POST["secret"]))
+if (!isset($_POST['secret']))
 {
-    die("No Secret");
+    http_response_code(403);
+    exit("Kein Zugriff");
 }
 
-if($_POST["secret"] != $secret)
+if ($_POST['secret'] !== $secret)
 {
-    die("Wrong Secret");
+    http_response_code(403);
+    exit("Falscher Schlüssel");
 }
 
-if(!isset($_POST["json"]))
+if (!isset($_POST['json']))
 {
-    die("No Data");
+    http_response_code(400);
+    exit("Keine Daten");
 }
 
 file_put_contents(
-    __DIR__ . "/data/cards.json",
-    $_POST["json"]
+    __DIR__ . "/../data/cards.json",
+    $_POST['json']
 );
 
 echo "OK";
-
-?>
