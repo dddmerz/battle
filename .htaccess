@@ -1,0 +1,30 @@
+RewriteEngine On
+
+WWW auf non-WWW umleiten
+
+RewriteCond %{HTTP_HOST} ^www.demerzli.tv$ [NC]
+RewriteRule ^(.*)$ https://demerzli.tv/$1 [L,R=301]
+
+HTTP auf HTTPS umleiten
+
+RewriteCond %{HTTPS} !=on
+RewriteRule ^(.*)$ https://demerzli.tv/$1 [L,R=301]
+
+Schöne Profil URLs
+
+RewriteRule ^user/([^/]+)/?$ profile.php?user=$1 [L,QSA]
+
+Schöne Karten URLs
+
+RewriteRule ^card/([0-9]+)/?$ card.php?id=$1 [L,QSA]
+
+Verzeichnislisting verhindern
+
+Options -Indexes
+
+Browser Cache
+ExpiresByType text/css "access plus 7 days"
+ExpiresByType application/javascript "access plus 7 days"
+ExpiresByType image/png "access plus 30 days"
+ExpiresByType image/jpeg "access plus 30 days"
+ExpiresByType image/gif "access plus 30 days"
