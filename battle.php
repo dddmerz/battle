@@ -1,12 +1,12 @@
 <?php
 session_start();
 
-require_once 'config/cards.php';
+require_once __DIR__ . '/config/cards.php';
 
-require_once 'includes/Fighter.php';
-require_once 'includes/BattleFunctions.php';
-require_once 'includes/BattleLogger.php';
-require_once 'includes/BattleEngine.php';
+require_once __DIR__ . '/includes/Fighter.php';
+require_once __DIR__ . '/includes/BattleLogger.php';
+require_once __DIR__ . '/includes/BattleFunctions.php';
+require_once __DIR__ . '/includes/BattleEngine.php';
 
 if (!isset($_SESSION['twitch_user'])) {
     header("Location: login.php");
@@ -15,251 +15,340 @@ if (!isset($_SESSION['twitch_user'])) {
 
 $username = strtolower($_SESSION['twitch_user']);
 
-$arenaFile   = __DIR__ . '/data/arena.json';
-$playersFile = __DIR__ . '/data/players.json';
-$cardsFile   = __DIR__ . '/data/cards.json';
+$arenaFile = __DIR__ . "/data/arena.json";
+$playersFile = __DIR__ . "/data/players.json";
+$cardsFile = __DIR__ . "/data/cards.json";
 
-$arena = json_decode(file_get_contents($arenaFile), true) ?: [];
-$players = json_decode(file_get_contents($playersFile), true) ?: [];
-$cardsData = json_decode(file_get_contents($cardsFile), true) ?: [];
+$arena = [];
 
-$id = (int)($_GET['id'] ?? 0);
+if(file_exists($arenaFile)){
+    $arena = json_decode(file_get_contents($arenaFile), true);
+}
+
+$players = [];
+
+if(file_exists($playersFile)){
+    $players = json_decode(file_get_contents($playersFile), true);
+}
+
+$cardsData = [];
+
+if(file_exists($cardsFile)){
+    $cardsData = json_decode(file_get_contents($cardsFile), true);
+}
+
+$id = intval($_GET["id"] ?? 0);
 
 $fight = null;
 $fightIndex = null;
 
-foreach ($arena as $index => $entry) {
+foreach($arena as $index=>$entry){
 
-    if (($entry['id'] ?? 0) == $id) {
+    if(($entry["id"] ?? 0) == $id){
 
         $fight = $entry;
         $fightIndex = $index;
+
         break;
     }
+
 }
 
-if (!$fight) {
+if(!$fight){
     die("Kampf nicht gefunden.");
 }
 
-if (
-    ($fight['status'] ?? '') != 'open'
+if(
+    ($fight["status"] ?? "") != "open"
     &&
-    !isset($fight['battle_log'])
-) {
-    die("Kampf bereits beendet.");
+    !isset($fight["battle_log"])
+){
+    die("Dieser Kampf wurde bereits abgeschlossen.");
 }
 
-if (($fight['creator'] ?? '') == $username) {
+if(
+    ($fight["creator"] ?? "") == $username
+    &&
+    !isset($fight["battle_log"])
+){
     die("Du kannst deinen eigenen Kampf nicht annehmen.");
 }
 
-if (!isset($players[$username])) {
+if(!isset($players[$username])){
 
     $players[$username] = [
 
-        "xp" => 0,
-        "wins" => 0,
-        "losses" => 0,
-        "draws" => 0
+        "xp"=>0,
+        "wins"=>0,
+        "losses"=>0,
+        "draws"=>0
 
     ];
+
 }
 
-$ownedCards = $cardsData["Users"][$username] ?? [];
+$ownedCards = [];
 
-if (
-    isset($_POST["startBattle"])
-    &&
-    !isset($fight["battle_log"])
-) {
+if(isset($cardsData["Users"][$username])){
+
+    $ownedCards = $cardsData["Users"][$username];
+
+}
+
+$error = "";
+<?php
+if(isset($_POST["startBattle"]) && !isset($fight["battle_log"])){
 
     $opponentCards = array_values(array_unique([
 
-        (int)$_POST["card1"],
-        (int)$_POST["card2"],
-        (int)$_POST["card3"]
+        intval($_POST["card1"] ?? 0),
+        intval($_POST["card2"] ?? 0),
+        intval($_POST["card3"] ?? 0)
 
     ]));
 
-    if (count($opponentCards) != 3) {
-        die("Bitte 3 verschiedene Karten auswählen.");
-    }
+    $opponentCards = array_values(array_filter($opponentCards));
 
-    $creatorCards = $fight["creator_cards"];
+    if(count($opponentCards) !== 3){
 
-    $engine = new BattleEngine();
+        $error = "Bitte 3 verschiedene Karten wählen.";
 
-    $battleLog = [];
+    }else{
 
-    $creatorWins = 0;
-    $opponentWins = 0;
+        foreach($opponentCards as $cardId){
 
-    for ($i = 0; $i < 3; $i++) {
+            if(!isset($cards[$cardId]) || !isset($battleStats[$cardId])){
 
-        $creator = new Fighter(
-            $creatorCards[$i],
-            $cards,
-            $battleStats
-        );
-
-        $opponent = new Fighter(
-            $opponentCards[$i],
-            $cards,
-            $battleStats
-        );
-
-        $result = $engine->fight(
-            $creator,
-            $opponent
-        );
-
-        $battleLog[] = [
-
-            "round" => $i + 1,
-
-            "creator_card" => $creatorCards[$i],
-
-            "opponent_card" => $opponentCards[$i],
-
-            "winner" => $result["winner"],
-
-            "creator_hp" => $result["creator"]["hp"],
-
-            "opponent_hp" => $result["opponent"]["hp"],
-
-            "log" => $result["log"]
-
-        ];
-
-        if ($result["winner"] == "creator") {
-
-            $creatorWins++;
-
-        } else {
-
-            $opponentWins++;
-
-        }
-
-    }
-
-    if ($creatorWins > $opponentWins) {
-
-        $winner = $fight["creator"];
-        $loser = $username;
-
-    } elseif ($opponentWins > $creatorWins) {
-
-        $winner = $username;
-        $loser = $fight["creator"];
-
-    } else {
-
-        $winner = "draw";
-
-    }
-
-    // XP
-
-    if ($winner != "draw") {
-
-        foreach ([$winner, $loser] as $player) {
-
-            if (!isset($players[$player])) {
-
-                $players[$player] = [
-
-                    "xp" => 0,
-                    "wins" => 0,
-                    "losses" => 0,
-                    "draws" => 0
-
-                ];
-            }
-
-        }
-
-        $players[$winner]["xp"] += 25;
-        $players[$winner]["wins"]++;
-
-        $players[$loser]["xp"] += 10;
-        $players[$loser]["losses"]++;
-
-    } else {
-
-        foreach ([$fight["creator"], $username] as $player) {
-
-            if (!isset($players[$player]["draws"])) {
-
-                $players[$player]["draws"] = 0;
+                $error = "Eine gewählte Karte ist ungültig.";
+                break;
 
             }
 
-            $players[$player]["xp"] += 15;
-            $players[$player]["draws"]++;
-
         }
 
     }
 
-    $arena[$fightIndex]["creator_score"] = $creatorWins;
-    $arena[$fightIndex]["opponent_score"] = $opponentWins;
+    if($error == ""){
 
-    $arena[$fightIndex]["winner"] = $winner;
+        $creatorCards = $fight["creator_cards"] ?? [];
 
-    $arena[$fightIndex]["opponent"] = $username;
+        $engine = new BattleEngine();
 
-    $arena[$fightIndex]["opponent_cards"] = $opponentCards;
+        $battleLog = [];
 
-    $arena[$fightIndex]["battle_log"] = $battleLog;
+        $creatorWins = 0;
+        $opponentWins = 0;
 
-    $arena[$fightIndex]["status"] = "finished";
+        for($i=0;$i<3;$i++){
 
-    file_put_contents(
-        $arenaFile,
-        json_encode($arena, JSON_PRETTY_PRINT)
-    );
+            $creatorCardId = intval($creatorCards[$i] ?? 0);
+            $opponentCardId = intval($opponentCards[$i] ?? 0);
 
-    file_put_contents(
-        $playersFile,
-        json_encode($players, JSON_PRETTY_PRINT)
-    );
+            if(
+                !isset($cards[$creatorCardId]) ||
+                !isset($battleStats[$creatorCardId]) ||
+                !isset($cards[$opponentCardId]) ||
+                !isset($battleStats[$opponentCardId])
+            ){
+                continue;
+            }
 
-    $fight = $arena[$fightIndex];
+            $creatorFighter = new Fighter(
+                $creatorCardId,
+                $cards,
+                $battleStats
+            );
+
+            $opponentFighter = new Fighter(
+                $opponentCardId,
+                $cards,
+                $battleStats
+            );
+
+            $result = $engine->run(
+                $creatorFighter,
+                $opponentFighter
+            );
+
+            if($result["winner"] == "creator"){
+
+                $creatorWins++;
+
+            }elseif($result["winner"] == "opponent"){
+
+                $opponentWins++;
+
+            }
+
+            $battleLog[] = [
+
+                "round" => $i + 1,
+
+                "creator_card" => $creatorCardId,
+                "opponent_card" => $opponentCardId,
+
+                "winner" => $result["winner"],
+
+                "creator" => $result["creator"],
+                "opponent" => $result["opponent"],
+
+                "log" => $result["log"]
+
+            ];
+
+        }
+
+        if($creatorWins > $opponentWins){
+
+            $winner = $fight["creator"];
+            $loser = $username;
+
+        }elseif($opponentWins > $creatorWins){
+
+            $winner = $username;
+            $loser = $fight["creator"];
+
+        }else{
+
+            $winner = "draw";
+            $loser = null;
+
+        }
+                if($winner == "draw"){
+
+            foreach([$fight["creator"], $username] as $player){
+
+                if(!isset($players[$player])){
+
+                    $players[$player] = [
+
+                        "xp"=>0,
+                        "wins"=>0,
+                        "losses"=>0,
+                        "draws"=>0
+
+                    ];
+
+                }
+
+                if(!isset($players[$player]["draws"])){
+                    $players[$player]["draws"] = 0;
+                }
+
+                $players[$player]["xp"] += 15;
+                $players[$player]["draws"]++;
+
+            }
+
+        }else{
+
+            foreach([$winner, $loser] as $player){
+
+                if(!isset($players[$player])){
+
+                    $players[$player] = [
+
+                        "xp"=>0,
+                        "wins"=>0,
+                        "losses"=>0,
+                        "draws"=>0
+
+                    ];
+
+                }
+
+            }
+
+            $players[$winner]["xp"] += 25;
+            $players[$winner]["wins"]++;
+
+            $players[$loser]["xp"] += 10;
+            $players[$loser]["losses"]++;
+
+        }
+
+        $arena[$fightIndex]["creator_score"] = $creatorWins;
+        $arena[$fightIndex]["opponent_score"] = $opponentWins;
+
+        $arena[$fightIndex]["opponent"] = $username;
+        $arena[$fightIndex]["opponent_cards"] = $opponentCards;
+
+        $arena[$fightIndex]["winner"] = $winner;
+        $arena[$fightIndex]["battle_log"] = $battleLog;
+        $arena[$fightIndex]["status"] = "finished";
+
+        file_put_contents(
+            $arenaFile,
+            json_encode($arena, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+        );
+
+        file_put_contents(
+            $playersFile,
+            json_encode($players, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+        );
+
+        $fight = $arena[$fightIndex];
+
+    }
+
 }
 
+function arenaIcon($type){
+
+    switch($type){
+
+        case "critical":
+            return "💥";
+
+        case "heal":
+            return "💚";
+
+        case "shield":
+            return "🛡️";
+
+        case "lightning":
+            return "⚡";
+
+        case "legendary":
+            return "🌈";
+
+        default:
+            return "⚔️";
+
+    }
+
+}
+?>
 <!DOCTYPE html>
 <html lang="de">
-
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Arena Kampf</title>
+<title>Kampf</title>
 
 <link rel="stylesheet" href="assets/css/style.css?v=10">
 <link rel="stylesheet" href="assets/css/arena.css?v=10">
-
 </head>
 
 <body>
 
 <header>
-
-    <div class="logo">
-
-        ⚔️ Arena
-
-    </div>
-
+    <div class="logo">⚔️ Kampf</div>
 </header>
 
 <?php include 'nav.php'; ?>
 
 <div class="container">
+
+<?php if($error != ""): ?>
+
+<div class="player-box">
+    <h2>⚠️ Fehler</h2>
+    <p><?= htmlspecialchars($error) ?></p>
+</div>
+
+<?php endif; ?>
 
 <?php if(isset($fight["battle_log"])): ?>
 
@@ -268,190 +357,60 @@ if (
 <h2>🏆 Kampfergebnis</h2>
 
 <p>
-
-<strong>
-
-<?= htmlspecialchars($fight["creator"]) ?>
-
-</strong>
-
+<strong><?= htmlspecialchars($fight["creator"]) ?></strong>
 gegen
-
-<strong>
-
-<?= htmlspecialchars($fight["opponent"]) ?>
-
-</strong>
-
+<strong><?= htmlspecialchars($fight["opponent"] ?? $username) ?></strong>
 </p>
 
 <p>
-
-Endstand
-
-<strong>
-
-<?= $fight["creator_score"] ?>
-
+<strong>Ergebnis:</strong>
+<?= intval($fight["creator_score"] ?? 0) ?>
 :
-
-<?= $fight["opponent_score"] ?>
-
-</strong>
-
+<?= intval($fight["opponent_score"] ?? 0) ?>
 </p>
 
-<?php
-
-foreach($fight["battle_log"] as $battle):
-
-?>
+<?php foreach($fight["battle_log"] as $battle): ?>
 
 <hr>
 
-<h3>
-
-Runde <?= $battle["round"] ?>
-
-</h3>
-
-<div class="battle-round">
-
-<div class="battle-card">
-
-<img
-src="assets/cards/<?= $cards[$battle["creator_card"]]["image"] ?>"
-class="mini-card">
-
-<h4>
-
-<?= $cards[$battle["creator_card"]]["name"] ?>
-
-</h4>
+<h3>Runde <?= intval($battle["round"]) ?></h3>
 
 <p>
+<strong><?= htmlspecialchars($cards[$battle["creator_card"]]["name"]) ?></strong>
+❤️ <?= intval($battle["creator"]["hp"] ?? 0) ?>/<?= intval($battle["creator"]["max_hp"] ?? 0) ?>
 
-❤️
+<br>
 
-<?= $battle["creator_hp"] ?>
+<strong>VS</strong>
 
-HP
+<br>
 
+<strong><?= htmlspecialchars($cards[$battle["opponent_card"]]["name"]) ?></strong>
+❤️ <?= intval($battle["opponent"]["hp"] ?? 0) ?>/<?= intval($battle["opponent"]["max_hp"] ?? 0) ?>
 </p>
-
-</div>
-
-<div class="battle-vs">
-
-VS
-
-</div>
-
-<div class="battle-card">
-
-<img
-src="assets/cards/<?= $cards[$battle["opponent_card"]]["image"] ?>"
-class="mini-card">
-
-<h4>
-
-<?= $cards[$battle["opponent_card"]]["name"] ?>
-
-</h4>
-
-<p>
-
-❤️
-
-<?= $battle["opponent_hp"] ?>
-
-HP
-
-</p>
-
-</div>
-
-</div>
 
 <div class="battle-log">
 
-<?php foreach($battle["log"] as $entry): ?>
+<?php foreach(($battle["log"] ?? []) as $entry): ?>
 
-<div class="battle-log-entry">
+<p class="battle-log-entry">
+<?= arenaIcon($entry["type"] ?? "attack") ?>
 
-<?php
-
-switch($entry["type"]){
-
-case "attack":
-
-echo "⚔️ ";
-
-break;
-
-case "critical":
-
-echo "💥 ";
-
-break;
-
-case "heal":
-
-echo "💚 ";
-
-break;
-
-case "shield":
-
-echo "🛡 ";
-
-break;
-
-case "lightning":
-
-echo "⚡ ";
-
-break;
-
-case "legendary":
-
-echo "🌈 ";
-
-break;
-
-default:
-
-echo "• ";
-
-}
-
-?>
-
-<strong>
-
-<?= htmlspecialchars($entry["attacker"]) ?>
-
-</strong>
+<strong><?= htmlspecialchars($entry["actor"] ?? "") ?></strong>
 
 →
 
-<strong>
+<strong><?= htmlspecialchars($entry["target"] ?? "") ?></strong>
 
-<?= htmlspecialchars($entry["target"]) ?>
+| Wert: <?= intval($entry["value"] ?? 0) ?>
 
-</strong>
+<?php if(isset($entry["target_hp"], $entry["target_max_hp"])): ?>
 
-|
+| HP:
+<?= intval($entry["target_hp"]) ?>/<?= intval($entry["target_max_hp"]) ?>
 
-<?= $entry["value"] ?>
-
-|
-
-HP:
-
-<?= $entry["target_hp"] ?>
-
-</div>
+<?php endif; ?>
+</p>
 
 <?php endforeach; ?>
 
@@ -461,106 +420,61 @@ HP:
 
 <hr>
 
-<h2>
+<?php if(($fight["winner"] ?? "") == "draw"): ?>
 
-<?php
+<h3>🤝 Gesamtergebnis: Unentschieden</h3>
 
-if($fight["winner"]=="draw"){
+<?php else: ?>
 
-echo "🤝 Unentschieden";
+<h3>🏆 Gesamtsieger: <?= htmlspecialchars($fight["winner"]) ?></h3>
 
-}else{
+<?php endif; ?>
 
-echo "🏆 Gewinner: ".htmlspecialchars($fight["winner"]);
-
-}
-
-?>
-
-</h2>
-
-<a
-href="arena.php"
-class="arena-button">
-
+<a href="arena.php" class="arena-button">
 Zur Arena
-
 </a>
 
 </div>
 
 <?php else: ?>
 
-<h2>
-
-<?= htmlspecialchars($fight["creator"]) ?>
-
-fordert dich heraus!
-
-</h2>
+<h1><?= htmlspecialchars($fight["creator"]) ?> fordert dich heraus!</h1>
 
 <?php
-
-$c1=$fight["creator_cards"][0];
-
-$c2=$fight["creator_cards"][1];
-
+$c1 = intval($fight["creator_cards"][0]);
+$c2 = intval($fight["creator_cards"][1]);
 ?>
 
 <div class="fight-cards">
 
-<img
-src="assets/cards/<?= $cards[$c1]["image"] ?>"
-class="mini-card">
+<img src="assets/cards/<?= htmlspecialchars($cards[$c1]["image"]) ?>" class="mini-card">
 
-<img
-src="assets/cards/<?= $cards[$c2]["image"] ?>"
-class="mini-card">
+<img src="assets/cards/<?= htmlspecialchars($cards[$c2]["image"]) ?>" class="mini-card">
 
-<div class="secret-card">
-
-❓
+<div class="secret-card">❓</div>
 
 </div>
 
-</div>
-
-<h3>
-
-Wähle deine 3 Karten
-
-</h3>
+<h2>Wähle deine 3 Karten</h2>
 
 <div class="card-selection">
 
 <?php foreach($ownedCards as $cardId): ?>
 
-<div
-class="arena-card"
-data-card="<?= $cardId ?>">
+<?php if(!isset($cards[$cardId], $battleStats[$cardId])) continue; ?>
 
-<img
-src="assets/cards/<?= $cards[$cardId]["image"] ?>">
+<div class="arena-card" data-card="<?= intval($cardId) ?>">
+
+<img src="assets/cards/<?= htmlspecialchars($cards[$cardId]["image"]) ?>">
 
 <div class="card-info">
 
-<strong>
-
-<?= $cards[$cardId]["name"] ?>
-
-</strong>
+<strong><?= htmlspecialchars($cards[$cardId]["name"]) ?></strong>
 
 <br>
 
-❤️
-
-<?= $battleStats[$cardId]["health"] ?>
-
-&nbsp;
-
-⚔️
-
-<?= $battleStats[$cardId]["attack"] ?>
+❤️ <?= intval($battleStats[$cardId]["health"]) ?>
+⚔️ <?= intval($battleStats[$cardId]["attack"]) ?>
 
 </div>
 
@@ -570,64 +484,41 @@ src="assets/cards/<?= $cards[$cardId]["image"] ?>">
 
 </div>
 
-<form method="POST">
+<form method="POST" id="battleForm">
 
-<input
-type="hidden"
-name="card1"
-id="card1">
+<input type="hidden" name="card1" id="card1">
+<input type="hidden" name="card2" id="card2">
+<input type="hidden" name="card3" id="card3">
 
-<input
-type="hidden"
-name="card2"
-id="card2">
-
-<input
-type="hidden"
-name="card3"
-id="card3">
-
-<button
-type="submit"
-name="startBattle"
-class="arena-button">
-
+<button type="submit" name="startBattle" class="arena-button">
 ⚔️ Kampf starten
-
 </button>
 
 </form>
 
-<?php endif; ?>
 <script>
-
 let selected = [];
 
 document.querySelectorAll(".arena-card").forEach(card => {
 
-    card.addEventListener("click", function () {
+    card.addEventListener("click", () => {
 
-        let id = this.dataset.card;
+        let id = card.dataset.card;
 
-        if (selected.includes(id)) {
+        if(selected.includes(id)){
 
-            selected = selected.filter(x => x != id);
+            selected = selected.filter(x => x !== id);
+            card.classList.remove("selected");
 
-            this.classList.remove("selected");
+        }else{
 
-        } else {
-
-            if (selected.length >= 3) {
-
+            if(selected.length >= 3){
                 alert("Du kannst nur 3 Karten auswählen.");
-
                 return;
-
             }
 
             selected.push(id);
-
-            this.classList.add("selected");
+            card.classList.add("selected");
 
         }
 
@@ -639,19 +530,19 @@ document.querySelectorAll(".arena-card").forEach(card => {
 
 });
 
-document.querySelector("form")?.addEventListener("submit", function(e){
+document.getElementById("battleForm").addEventListener("submit", function(e){
 
-    if(selected.length != 3){
+    if(selected.length !== 3){
 
         e.preventDefault();
-
         alert("Bitte wähle zuerst 3 Karten aus.");
 
     }
 
 });
-
 </script>
+
+<?php endif; ?>
 
 </div>
 
